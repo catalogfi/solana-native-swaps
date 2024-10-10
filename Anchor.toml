@@ -1,0 +1,18 @@
+[toolchain]
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+solana_native_atomic_swaps = "GmmfyjGJaSaH7ZgRp4BYEr7v9vydtd4NKg4yJnWdzRgj"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -b -p ./tsconfig.json -t 1000000 tests/**/*.ts"
