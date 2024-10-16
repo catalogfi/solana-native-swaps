@@ -62,7 +62,7 @@ pub mod solana_native_atomic_swaps {
     }
 
     pub fn instant_refund(ctx: Context<InstantRefund>) -> Result<()> {
-        emit!(RefundedInstantly { swap_id: ctx.accounts.swap_account.swap_id });
+        emit!(InstantRefunded { swap_id: ctx.accounts.swap_account.swap_id });
         // All SOL in the swap account incl. rent fees will be transferred to the refundee
         // by the 'close' attribute in the RefundInstant struct
         Ok(())
@@ -148,7 +148,7 @@ pub struct Refunded {
     pub swap_id: [u8; 32],
 }
 #[event]
-pub struct RefundedInstantly {
+pub struct InstantRefunded {
     pub swap_id: [u8; 32],
 }
 
