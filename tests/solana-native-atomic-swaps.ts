@@ -38,12 +38,11 @@ describe("Testing one way swap between Alice and Bob", () => {
     const aliceInitiate = () => new Promise<void>(async resolve => {
         await program.methods.initiate(bobPubkey, secretHash, swapAmount, swapExpiresIn)
             .accounts({
-                swapAccount,
                 initiator: alicePubkey,
             }).signers([alice]).rpc()
-            .then(async sig => {
-                console.log("Alice initiated with Signature:", sig);
-                await connection.confirmTransaction(sig);
+            .then(async signature => {
+                console.log("Alice initiated with Signature:", signature);
+                await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
             });
             resolve();
         }
@@ -52,8 +51,9 @@ describe("Testing one way swap between Alice and Bob", () => {
     before(async () => {
         // Fund alice's wallet with 1 SOL
         await connection.requestAirdrop(alicePubkey, anchor.web3.LAMPORTS_PER_SOL)
-        .then(async sig => await connection.confirmTransaction(sig));
-        // For some program sizes, larger rentAmount (e.g. six bytes more worth) is taken for some reason
+        .then(async signature =>
+            // For some program sizes, larger rentAmount (e.g. six bytes more worth) is taken somehow
+            await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())}));
         rentAmount = await connection.getMinimumBalanceForRentExemption(size);
     });
 
@@ -71,9 +71,9 @@ describe("Testing one way swap between Alice and Bob", () => {
             swapAccount,
             redeemer: bobPubkey,
         }).rpc()
-        .then(async sig => {
-            console.log("Bob redeemed with Signature:", sig);
-            await connection.confirmTransaction(sig);
+        .then(async signature => {
+            console.log("Bob redeemed with Signature:", signature);
+            await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
         });
 
         const pdaBalance = await connection.getBalance(swapAccount);
@@ -90,9 +90,9 @@ describe("Testing one way swap between Alice and Bob", () => {
             swapAccount,
             refundee: alicePubkey,
         }).rpc()
-        .then(async sig => {
-            console.log("Alice refunded with Signature:", sig);
-            await connection.confirmTransaction(sig);
+        .then(async signature => {
+            console.log("Alice refunded with Signature:", signature);
+            await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
         });
 
         const pdaBalance = await connection.getBalance(swapAccount);
@@ -108,9 +108,9 @@ describe("Testing one way swap between Alice and Bob", () => {
             redeemer: bobPubkey,
         }).signers([alice, bob])
         .rpc()
-        .then(async sig => {
-            console.log("Alice instant-refunded with Signature:", sig);
-            await connection.confirmTransaction(sig);
+        .then(async signature => {
+            console.log("Alice instant-refunded with Signature:", signature);
+            await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
         });
 
         const pdaBalance = await connection.getBalance(swapAccount);
