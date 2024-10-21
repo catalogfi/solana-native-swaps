@@ -23,12 +23,15 @@ describe("Testing one way swap between Alice and Bob", () => {
     const secret = Buffer.from(Array(32).fill(0));
     const secretHash = [...(crypto.createHash('sha256').update(secret).digest())];
 
+    const _swapIdPreImage = Buffer.concat([alicePubkey.toBuffer(), Buffer.from(secretHash)]);
+    const swapId = crypto.createHash('sha256').update(_swapIdPreImage).digest();
+
     // Bob's stuff
     const bob = new anchor.web3.Keypair();
     const bobPubkey = bob.publicKey;
 
     // PDA
-    const pdaSeeds = [Buffer.from("swap_account"), alicePubkey.toBuffer(), Buffer.from(secretHash)];
+    const pdaSeeds = [Buffer.from("swap_account"), swapId];
     const [swapAccount,] = anchor.web3.PublicKey.findProgramAddressSync(pdaSeeds, program.programId);
     const size = program.account.swapAccount.size;
     let rentAmount: number;
@@ -36,7 +39,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     console.log(`Alice: ${alicePubkey}\nBob: ${bobPubkey}\nSwap Account (PDA): ${swapAccount}`);
 
     const aliceInitiate = () => new Promise<void>(async resolve => {
-        await program.methods.initiate(bobPubkey, secretHash, swapAmount, swapExpiresIn)
+        await program.methods.initiate([...swapId], bobPubkey, secretHash, swapAmount, swapExpiresIn)
             .accounts({
                 initiator: alicePubkey,
             }).signers([alice]).rpc()

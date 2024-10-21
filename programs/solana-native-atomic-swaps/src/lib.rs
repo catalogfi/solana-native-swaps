@@ -13,13 +13,12 @@ pub mod solana_native_atomic_swaps {
 
     pub fn initiate(
         ctx: Context<Initiate>,
+        swap_id: [u8; 32],
         redeemer: Pubkey,
         secret_hash: [u8; 32],
         amount: Lamports,
         expires_in: Slots,
     ) -> Result<()> {
-        let swap_id =
-            hash::hash(&[ctx.accounts.initiator.key().as_ref(), &secret_hash].concat()).to_bytes();
         *ctx.accounts.swap_account = SwapAccount {
             swap_id,
             redeemer,
@@ -82,12 +81,12 @@ pub struct SwapAccount {
 #[derive(Accounts)]
 // redeemer is included in #[instruction(...)] for reasons outlined in:
 // https://www.anchor-lang.com/docs/account-constraints#instruction-attribute
-#[instruction(redeemer: Pubkey, secret_hash: [u8; 32])]
+#[instruction(swap_id: [u8; 32])]
 pub struct Initiate<'info> {
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_account".as_ref(), initiator.key().as_ref(), secret_hash.as_ref()],
+        seeds = [b"swap_account".as_ref(), &swap_id],
         bump,
         space = 8 + std::mem::size_of::<SwapAccount>(),
     )]
