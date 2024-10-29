@@ -36,14 +36,25 @@ pub mod solana_native_atomic_swaps {
             },
         );
         system_program::transfer(cpi_context, amount)?;
-        emit!(Initiated { swap_id, secret_hash, amount });
+        emit!(Initiated {
+            swap_id,
+            secret_hash,
+            amount
+        });
 
         Ok(())
     }
 
     pub fn redeem(ctx: Context<Redeem>, secret: [u8; 32]) -> Result<()> {
-        let SwapAccount { swap_id, secret_hash, .. } = *ctx.accounts.swap_account;
-        require!(hash::hash(&secret).to_bytes() == secret_hash, SwapError::InvalidSecret);
+        let SwapAccount {
+            swap_id,
+            secret_hash,
+            ..
+        } = *ctx.accounts.swap_account;
+        require!(
+            hash::hash(&secret).to_bytes() == secret_hash,
+            SwapError::InvalidSecret
+        );
         emit!(Redeemed { swap_id, secret });
         // All SOL in the swap account incl. rent fees will be transferred to the redeemer
         // by the 'close' attribute in the Redeem struct
@@ -51,7 +62,11 @@ pub mod solana_native_atomic_swaps {
     }
 
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
-        let SwapAccount { swap_id, expiry_slot, .. } = *ctx.accounts.swap_account;
+        let SwapAccount {
+            swap_id,
+            expiry_slot,
+            ..
+        } = *ctx.accounts.swap_account;
         let current_slot = Clock::get()?.slot;
         require!(current_slot >= expiry_slot, SwapError::RefundBeforeExpiry);
         emit!(Refunded { swap_id });
@@ -61,7 +76,9 @@ pub mod solana_native_atomic_swaps {
     }
 
     pub fn instant_refund(ctx: Context<InstantRefund>) -> Result<()> {
-        emit!(InstantRefunded { swap_id: ctx.accounts.swap_account.swap_id });
+        emit!(InstantRefunded {
+            swap_id: ctx.accounts.swap_account.swap_id
+        });
         // All SOL in the swap account incl. rent fees will be transferred to the refundee
         // by the 'close' attribute in the RefundInstant struct
         Ok(())
@@ -124,8 +141,9 @@ pub struct InstantRefund<'info> {
     // Closes and transfers all SOL to the initiator upon success
     pub swap_account: Account<'info, SwapAccount>,
 
+    /// CHECK: The public key of the initiator
     #[account(mut, address = swap_account.initiator @ SwapError::InvalidRefundee)]
-    pub initiator: Signer<'info>,
+    pub initiator: AccountInfo<'info>,
 
     #[account(address = swap_account.redeemer @ SwapError::InvalidRedeemer)]
     pub redeemer: Signer<'info>,

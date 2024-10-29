@@ -109,7 +109,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             swapAccount,
             initiator: alicePubkey,
             redeemer: bobPubkey,
-        }).signers([alice, bob])
+        }).signers([bob])
         .rpc()
         .then(async signature => {
             console.log("Alice instant-refunded with Signature:", signature);
