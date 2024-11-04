@@ -2,13 +2,13 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use solana_program::hash;
 
-declare_id!("GmmfyjGJaSaH7ZgRp4BYEr7v9vydtd4NKg4yJnWdzRgj");
+declare_id!("GfCxk9H9EoHP7cvophozquwRTkkm3ierP6sVUWKBBwCe");
 
 type Lamports = u64; // 1 SOL = 10^9 lamports
 type Slots = u64; // 1 slot = 400ms
 
 #[program]
-pub mod solana_native_atomic_swaps {
+pub mod solana_native_swaps {
     use super::*;
 
     pub fn initiate(

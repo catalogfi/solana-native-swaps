@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { SolanaNativeAtomicSwaps } from "../target/types/solana_native_atomic_swaps";
+import { SolanaNativeSwaps } from "../target/types/solana_native_swaps";
 
 import * as crypto from 'crypto';
 import { expect } from "chai";
@@ -8,7 +8,7 @@ import { expect } from "chai";
 // Configure the client to use the local cluster.
 anchor.setProvider(anchor.AnchorProvider.env());
 const connection = anchor.getProvider().connection;
-const program = anchor.workspace.SolanaNativeAtomicSwaps as Program<SolanaNativeAtomicSwaps>;
+const program = anchor.workspace.SolanaNativeSwaps as Program<SolanaNativeSwaps>;
 const LAMPORTS_PER_SOL = anchor.web3.LAMPORTS_PER_SOL;
 const MILLIS_PER_SLOT = 400;
 

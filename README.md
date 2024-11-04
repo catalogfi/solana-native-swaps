@@ -1,4 +1,4 @@
-# solana-native-atomic-swaps
+# solana-native-swaps
 Solana Program for Atomic Swaps with SOL
 
 ## Instructions
