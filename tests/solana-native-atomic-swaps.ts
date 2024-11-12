@@ -14,7 +14,7 @@ const MILLIS_PER_SLOT = 400;
 
 describe("Testing one way swap between Alice and Bob", () => {
     const swapAmount = new anchor.BN(0.1 * LAMPORTS_PER_SOL);
-    const swapExpiresIn = new anchor.BN(1000 / MILLIS_PER_SLOT); // 1 second
+    const swapExpiresIn = 1000 / MILLIS_PER_SLOT; // 1 second
 
     // Alice is the initiator here
     // Alice's stuff
@@ -87,7 +87,7 @@ describe("Testing one way swap between Alice and Bob", () => {
         await aliceInitiate();  // Re-initiating for the sake of testcase
 
         console.log("Awaiting timelock for refund");
-        await new Promise(r => setTimeout(r, swapExpiresIn.toNumber() * MILLIS_PER_SLOT));
+        await new Promise(r => setTimeout(r, swapExpiresIn * MILLIS_PER_SLOT));
         await program.methods.refund()
         .accounts({
             swapAccount,

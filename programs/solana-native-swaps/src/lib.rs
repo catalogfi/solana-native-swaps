@@ -5,7 +5,7 @@ use solana_program::hash;
 declare_id!("GfCxk9H9EoHP7cvophozquwRTkkm3ierP6sVUWKBBwCe");
 
 type Lamports = u64; // 1 SOL = 10^9 lamports
-type Slots = u64; // 1 slot = 400ms
+type Slots = u32; // 1 slot = 400ms
 
 #[program]
 pub mod solana_native_swaps {
@@ -25,7 +25,7 @@ pub mod solana_native_swaps {
             secret_hash,
             amount,
             initiator: ctx.accounts.initiator.key(),
-            expiry_slot: Clock::get()?.slot + expires_in,
+            expiry_slot: Clock::get()?.slot + expires_in as u64,
         };
 
         let cpi_context = CpiContext::new(
