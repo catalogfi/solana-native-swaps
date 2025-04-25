@@ -1,11 +1,6 @@
-use anchor_lang::prelude::*;
-use anchor_lang::system_program;
-use solana_program::hash;
+use anchor_lang::{prelude::*, solana_program::hash, system_program};
 
-declare_id!("GfCxk9H9EoHP7cvophozquwRTkkm3ierP6sVUWKBBwCe");
-
-type Lamports = u64; // 1 SOL = 10^9 lamports
-type Slots = u32; // 1 slot = 400ms
+declare_id!("6eksgdCnSjUaGQWZ6iYvauv1qzvYPF33RTGTM1ZuyENx");
 
 #[program]
 pub mod solana_native_swaps {
@@ -13,63 +8,60 @@ pub mod solana_native_swaps {
 
     pub fn initiate(
         ctx: Context<Initiate>,
-        swap_id: [u8; 32],
+        amount_lamports: u64,
+        expires_in_slots: u64,
         redeemer: Pubkey,
         secret_hash: [u8; 32],
-        amount: Lamports,
-        expires_in: Slots,
     ) -> Result<()> {
         *ctx.accounts.swap_account = SwapAccount {
-            swap_id,
+            amount_lamports,
+            expiry_slot: Clock::get()?.slot + expires_in_slots,
+            initiator: ctx.accounts.initiator.key(),
             redeemer,
             secret_hash,
-            amount,
-            initiator: ctx.accounts.initiator.key(),
-            expiry_slot: Clock::get()?.slot + expires_in as u64,
         };
 
-        let cpi_context = CpiContext::new(
+        let transfer_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.initiator.to_account_info(),
                 to: ctx.accounts.swap_account.to_account_info(),
             },
         );
-        system_program::transfer(cpi_context, amount)?;
+        system_program::transfer(transfer_context, amount_lamports)?;
         emit!(Initiated {
-            swap_id,
+            amount_lamports,
+            expires_in_slots,
+            initiator: ctx.accounts.initiator.key(),
+            redeemer,
             secret_hash,
-            amount
         });
 
         Ok(())
     }
 
     pub fn redeem(ctx: Context<Redeem>, secret: [u8; 32]) -> Result<()> {
-        let SwapAccount {
-            swap_id,
-            secret_hash,
-            ..
-        } = *ctx.accounts.swap_account;
+        let secret_hash = ctx.accounts.swap_account.secret_hash;
         require!(
             hash::hash(&secret).to_bytes() == secret_hash,
             SwapError::InvalidSecret
         );
-        emit!(Redeemed { swap_id, secret });
+        // Just emitting the secret should be enough, as the PDA is derived from secret hash,
+        // and at any given time, there can only be one PDA.
+        // Thus a malicious user cannot create another swap with the same secret hash,
+        // till this swap is finished.
+        emit!(Redeemed { secret });
         // All SOL in the swap account incl. rent fees will be transferred to the redeemer
         // by the 'close' attribute in the Redeem struct
         Ok(())
     }
 
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
-        let SwapAccount {
-            swap_id,
-            expiry_slot,
-            ..
-        } = *ctx.accounts.swap_account;
+        let secret_hash = ctx.accounts.swap_account.secret_hash;
+        let expiry_slot = ctx.accounts.swap_account.expiry_slot;
         let current_slot = Clock::get()?.slot;
-        require!(current_slot >= expiry_slot, SwapError::RefundBeforeExpiry);
-        emit!(Refunded { swap_id });
+        require!(current_slot > expiry_slot, SwapError::RefundBeforeExpiry);
+        emit!(Refunded { secret_hash });
         // All SOL in the swap account incl. rent fees will be transferred to the refundee
         // by the 'close' attribute in the Refund struct
         Ok(())
@@ -77,7 +69,7 @@ pub mod solana_native_swaps {
 
     pub fn instant_refund(ctx: Context<InstantRefund>) -> Result<()> {
         emit!(InstantRefunded {
-            swap_id: ctx.accounts.swap_account.swap_id
+            secret_hash: ctx.accounts.swap_account.secret_hash
         });
         // All SOL in the swap account incl. rent fees will be transferred to the refundee
         // by the 'close' attribute in the RefundInstant struct
@@ -87,28 +79,27 @@ pub mod solana_native_swaps {
 
 #[account]
 pub struct SwapAccount {
-    swap_id: [u8; 32],
+    amount_lamports: u64,
+    expiry_slot: u64,
     initiator: Pubkey,
     redeemer: Pubkey,
     secret_hash: [u8; 32],
-    expiry_slot: u64,
-    amount: Lamports,
 }
 
 #[derive(Accounts)]
-// redeemer is included in #[instruction(...)] for reasons outlined in:
 // https://www.anchor-lang.com/docs/account-constraints#instruction-attribute
-#[instruction(swap_id: [u8; 32])]
+#[instruction(amount: u64, expires_in_slots: u64, redeemer: Pubkey, secret_hash: [u8; 32])]
 pub struct Initiate<'info> {
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_account".as_ref(), &swap_id],
+        seeds = [b"swap_account".as_ref(), &secret_hash],
         bump,
         space = 8 + std::mem::size_of::<SwapAccount>(),
     )]
     pub swap_account: Account<'info, SwapAccount>,
 
+    /// Initiator must sign this transaction.
     #[account(mut)]
     pub initiator: Signer<'info>,
 
@@ -117,20 +108,20 @@ pub struct Initiate<'info> {
 
 #[derive(Accounts)]
 pub struct Redeem<'info> {
-    #[account(mut, close = redeemer)] // Closes and transfers all SOL to redeemer upon success
+    #[account(mut, close = redeemer)]
     pub swap_account: Account<'info, SwapAccount>,
 
-    /// CHECK: The public key of the redeemer
+    /// CHECK: `redeemer` here and redeemer provided during initiate() must be equal
     #[account(mut, address = swap_account.redeemer @ SwapError::InvalidRedeemer)]
     pub redeemer: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
 pub struct Refund<'info> {
-    #[account(mut, close = refundee)] // Closes and transfers all SOL to refundee upon success
+    #[account(mut, close = refundee)]
     pub swap_account: Account<'info, SwapAccount>,
 
-    /// CHECK: The public key of the initiator
+    /// CHECK: `refundee` here and initiator provided during initiate() must be equal
     #[account(mut, address = swap_account.initiator @ SwapError::InvalidRefundee)]
     pub refundee: AccountInfo<'info>,
 }
@@ -138,35 +129,37 @@ pub struct Refund<'info> {
 #[derive(Accounts)]
 pub struct InstantRefund<'info> {
     #[account(mut, close = initiator)]
-    // Closes and transfers all SOL to the initiator upon success
     pub swap_account: Account<'info, SwapAccount>,
 
-    /// CHECK: The public key of the initiator
+    /// CHECK: `initiator` here and initiator provided during initiate() must be equal
     #[account(mut, address = swap_account.initiator @ SwapError::InvalidRefundee)]
     pub initiator: AccountInfo<'info>,
 
+    /// CHECK: `redeemer` here and redeemer provided during initiate() must be equal.
+    /// Redeemer must sign this transaction.
     #[account(address = swap_account.redeemer @ SwapError::InvalidRedeemer)]
     pub redeemer: Signer<'info>,
 }
 
 #[event]
 pub struct Initiated {
-    swap_id: [u8; 32],
-    secret_hash: [u8; 32],
-    amount: u64,
+    pub amount_lamports: u64,
+    pub expires_in_slots: u64,
+    pub initiator: Pubkey,
+    pub redeemer: Pubkey,
+    pub secret_hash: [u8; 32],
 }
 #[event]
 pub struct Redeemed {
-    pub swap_id: [u8; 32],
     pub secret: [u8; 32],
 }
 #[event]
 pub struct Refunded {
-    pub swap_id: [u8; 32],
+    pub secret_hash: [u8; 32],
 }
 #[event]
 pub struct InstantRefunded {
-    pub swap_id: [u8; 32],
+    pub secret_hash: [u8; 32],
 }
 
 #[error_code]
