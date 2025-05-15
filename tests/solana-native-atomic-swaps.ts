@@ -15,18 +15,18 @@ const MILLIS_PER_SLOT = 400;
 describe("Testing one way swap between Alice and Bob", () => {
 	const swapAmount = new anchor.BN(0.1 * LAMPORTS_PER_SOL);
 	const expiresInSlots = new anchor.BN(800 / MILLIS_PER_SLOT); // 0.8 secs
-
+	const airdropAmount = 1 * LAMPORTS_PER_SOL;
 	// Alice is the initiator here
 	// Alice's stuff
-	const alice = anchor.web3.Keypair.fromSeed(new Uint8Array(32).fill(0));
-	const secret = Buffer.from(Array(32).fill(0));
+	const alice = anchor.web3.Keypair.fromSeed(crypto.randomBytes(32));
+	const secret = crypto.randomBytes(32);
 	const secretHash = [...(crypto.createHash('sha256').update(secret).digest())];
 
 	// Bob's stuff
-	const bob = anchor.web3.Keypair.fromSeed(new Uint8Array(32).fill(1));
+	const bob = anchor.web3.Keypair.fromSeed(crypto.randomBytes(32));
 
 	// PDA
-	const pdaSeeds = [Buffer.from("swap_account"), Buffer.from(secretHash)];
+	const pdaSeeds = [Buffer.from("swap_account"), alice.publicKey.toBuffer(), Buffer.from(secretHash)];
 	const [swapAccount,] = anchor.web3.PublicKey.findProgramAddressSync(pdaSeeds, program.programId);
 	const size = program.account.swapAccount.size;
 	let rentAmount: number;
@@ -50,11 +50,10 @@ describe("Testing one way swap between Alice and Bob", () => {
 	before(async () => {
 		console.log("performing airdrop of 1 SOL to alice");
 		// Fund alice's wallet with 1 SOL
-		await connection.requestAirdrop(alice.publicKey, anchor.web3.LAMPORTS_PER_SOL)
-			.then(async signature =>
-				// For some program sizes, larger rentAmount (e.g. six bytes more worth) is taken somehow
-				await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())}));
+		let airdropSig = await connection.requestAirdrop(alice.publicKey, airdropAmount);
+		await connection.confirmTransaction({signature: airdropSig, ...(await connection.getLatestBlockhash())});
 		console.log("airdrop successful");
+		// For some program sizes, larger rentAmount (e.g. six bytes more worth) is taken somehow
 		rentAmount = await connection.getMinimumBalanceForRentExemption(size);
 	});
 
@@ -69,6 +68,7 @@ describe("Testing one way swap between Alice and Bob", () => {
 		await program.methods.redeem([...secret])
 			.accounts({
 				swapAccount,
+				initiator: alice.publicKey,
 				redeemer: bob.publicKey,
 			}).rpc()
 			.then(async signature => {
@@ -88,7 +88,7 @@ describe("Testing one way swap between Alice and Bob", () => {
 		await program.methods.refund()
 			.accounts({
 				swapAccount,
-				refundee: alice.publicKey,
+				initiator: alice.publicKey,
 			}).rpc()
 			.then(async signature => {
 				console.log("Alice refunded with Signature:", signature);
