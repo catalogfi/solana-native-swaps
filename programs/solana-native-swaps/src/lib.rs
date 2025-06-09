@@ -1,6 +1,6 @@
 use anchor_lang::{prelude::*, solana_program::hash, system_program};
 
-declare_id!("6eksgdCnSjUaGQWZ6iYvauv1qzvYPF33RTGTM1ZuyENx");
+declare_id!("2bag6xpshpvPe7SJ9nSDLHpxqhEAoHPGpEkjNSv7gxoF");
 
 #[program]
 pub mod solana_native_swaps {
