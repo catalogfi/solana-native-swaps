@@ -31,7 +31,7 @@ pub mod solana_native_swaps {
         system_program::transfer(transfer_context, amount_lamports)?;
 
         emit!(Initiated {
-            amount_lamports,
+            swap_amount: amount_lamports,
             expires_in_slots,
             initiator: ctx.accounts.initiator.key(),
             redeemer,
@@ -161,7 +161,7 @@ pub struct InstantRefund<'info> {
 
 #[event]
 pub struct Initiated {
-    pub amount_lamports: u64,
+    pub swap_amount: u64,
     pub expires_in_slots: u64,
     pub initiator: Pubkey,
     pub redeemer: Pubkey,
