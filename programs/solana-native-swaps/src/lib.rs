@@ -2,6 +2,9 @@ use anchor_lang::{prelude::*, solana_program::hash, system_program};
 
 declare_id!("6eksgdCnSjUaGQWZ6iYvauv1qzvYPF33RTGTM1ZuyENx");
 
+/// The size of Anchor's internal discriminator in a PDA's memory
+const ANCHOR_DISCRIMINATOR: usize = 8;
+
 #[program]
 pub mod solana_native_swaps {
     use super::*;
@@ -108,7 +111,7 @@ pub struct Initiate<'info> {
         payer = initiator,
         seeds = [b"swap_account", initiator.key().as_ref(), &secret_hash],
         bump,
-        space = 8 + std::mem::size_of::<SwapAccount>(),
+        space = ANCHOR_DISCRIMINATOR + std::mem::size_of::<SwapAccount>(),
     )]
     pub swap_account: Account<'info, SwapAccount>,
 
