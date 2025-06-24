@@ -189,13 +189,13 @@ pub struct InstantRefunded {
 
 #[error_code]
 pub enum SwapError {
-    #[msg("The provided initiator is not the original initiator of this swap account")]
+    #[msg("The provided initiator is not the original initiator of this swap")]
     InvalidInitiator,
 
-    #[msg("The provided redeemer is not the original redeemer of this swap amount")]
+    #[msg("The provided redeemer is not the original redeemer of this swap")]
     InvalidRedeemer,
 
-    #[msg("The provided secret does not correspond to the secret hash in the swap account")]
+    #[msg("The provided secret does not correspond to the secret hash of this swap")]
     InvalidSecret,
 
     #[msg("Attempt to perform a refund before expiry time")]
