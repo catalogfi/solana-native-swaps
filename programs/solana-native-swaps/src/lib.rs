@@ -94,6 +94,7 @@ pub mod solana_native_swaps {
 }
 
 #[account]
+#[derive(InitSpace)]
 pub struct SwapAccount {
     amount_lamports: u64,
     expiry_slot: u64,
@@ -111,7 +112,7 @@ pub struct Initiate<'info> {
         payer = initiator,
         seeds = [b"swap_account", initiator.key().as_ref(), &secret_hash],
         bump,
-        space = ANCHOR_DISCRIMINATOR + std::mem::size_of::<SwapAccount>(),
+        space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
     )]
     pub swap_account: Account<'info, SwapAccount>,
 
