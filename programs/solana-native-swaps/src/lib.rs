@@ -16,14 +16,6 @@ pub mod solana_native_swaps {
         redeemer: Pubkey,
         secret_hash: [u8; 32],
     ) -> Result<()> {
-        *ctx.accounts.swap_account = SwapAccount {
-            amount_lamports,
-            expiry_slot: Clock::get()?.slot + expires_in_slots,
-            initiator: ctx.accounts.initiator.key(),
-            redeemer,
-            secret_hash,
-        };
-
         let transfer_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
@@ -32,6 +24,14 @@ pub mod solana_native_swaps {
             },
         );
         system_program::transfer(transfer_context, amount_lamports)?;
+
+        *ctx.accounts.swap_account = SwapAccount {
+            amount_lamports,
+            expiry_slot: Clock::get()?.slot + expires_in_slots,
+            initiator: ctx.accounts.initiator.key(),
+            redeemer,
+            secret_hash,
+        };
 
         emit!(Initiated {
             swap_amount: amount_lamports,
