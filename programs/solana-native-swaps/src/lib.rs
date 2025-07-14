@@ -36,6 +36,7 @@ pub mod solana_native_swaps {
         *ctx.accounts.swap_account = SwapAccount {
             expiry_slot: Clock::get()?.slot + expires_in_slots,
             bump: ctx.bumps.swap_account,
+            sponsor: ctx.accounts.sponsor.key(),
             expires_in_slots,
             initiator: ctx.accounts.initiator.key(),
             redeemer,
@@ -165,6 +166,9 @@ pub struct SwapAccount {
     secret_hash: [u8; 32],
     /// The quantity of native SOL to be transferred through this atomic swap in base units (aka lamports)
     swap_amount: u64,
+    /// The entity that paid the rent fees for the creation of this PDA.
+    /// This will be referenced during the refund of the same upon closing this PDA.
+    sponsor: Pubkey,
 }
 
 #[derive(Accounts)]
@@ -179,7 +183,7 @@ pub struct Initiate<'info> {
     /// This PDA will be deleted upon completion of the swap.
     #[account(
         init,
-        payer = initiator,
+        payer = sponsor,
         seeds = [
             &expires_in_slots.to_le_bytes(),
             initiator.key().as_ref(),
@@ -195,6 +199,12 @@ pub struct Initiate<'info> {
     /// The initiator of the atomic swap. They must sign this transaction.
     #[account(mut)]
     pub initiator: Signer<'info>,
+
+    /// Any entity that pays the PDA rent.
+    /// Upon completion of the swap, the PDA rent refund resulting from the
+    /// deletion of `swap_account` will be refunded to this address.
+    #[account(mut)]
+    pub sponsor: Signer<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -214,18 +224,17 @@ pub struct Redeem<'info> {
             &swap_account.swap_amount.to_le_bytes(),
         ],
         bump = swap_account.bump,
-        close = initiator
+        close = sponsor,
     )]
     pub swap_account: Account<'info, SwapAccount>,
-
-    /// CHECK: Verifying the initiator.  
-    /// This is included here for the PDA rent refund using the `close` attribute above.
-    #[account(mut, address = swap_account.initiator @ SwapError::InvalidInitiator)]
-    pub initiator: AccountInfo<'info>,
 
     /// CHECK: Verifying the redeemer
     #[account(mut, address = swap_account.redeemer @ SwapError::InvalidRedeemer)]
     pub redeemer: AccountInfo<'info>,
+
+    /// CHECK: Sponsor's address for refunding PDA rent
+    #[account(mut, address = swap_account.sponsor @ SwapError::InvalidSponsor)]
+    pub sponsor: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -243,14 +252,17 @@ pub struct Refund<'info> {
             &swap_account.swap_amount.to_le_bytes(),
         ],
         bump = swap_account.bump,
-        close = initiator
+        close = sponsor,
     )]
     pub swap_account: Account<'info, SwapAccount>,
 
-    /// CHECK: Verifying the initiator.
-    /// This is included here for the PDA rent refund using the `close` attribute above.
+    /// CHECK: The initiator of the swap.
     #[account(mut, address = swap_account.initiator @ SwapError::InvalidInitiator)]
     pub initiator: AccountInfo<'info>,
+
+    /// CHECK: Sponsor's address for refunding PDA rent
+    #[account(mut, address = swap_account.sponsor @ SwapError::InvalidSponsor)]
+    pub sponsor: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -268,18 +280,21 @@ pub struct InstantRefund<'info> {
             &swap_account.swap_amount.to_le_bytes(),
         ],
         bump = swap_account.bump,
-        close = initiator
+        close = sponsor,
     )]
     pub swap_account: Account<'info, SwapAccount>,
 
-    /// CHECK: Verifying the initiator.
-    /// This is included here for the PDA rent refund using the `close` attribute above.
+    /// CHECK: The initiator of the swap.
     #[account(mut, address = swap_account.initiator @ SwapError::InvalidInitiator)]
     pub initiator: AccountInfo<'info>,
 
-    /// CHECK: Verifying the redeemer. Redeemer must sign this transaction.
+    /// CHECK: The redeemer of the swap. They must sign this transaction.
     #[account(address = swap_account.redeemer @ SwapError::InvalidRedeemer)]
     pub redeemer: Signer<'info>,
+
+    /// CHECK: Sponsor's address for PDA rent refund
+    #[account(mut, address = swap_account.sponsor @ SwapError::InvalidSponsor)]
+    pub sponsor: AccountInfo<'info>,
 }
 
 /// Represents the initiated state of the swap where the initiator has deposited funds into the vault
@@ -337,6 +352,9 @@ pub enum SwapError {
 
     #[msg("The provided secret does not correspond to the secret hash of this swap")]
     InvalidSecret,
+
+    #[msg("The provided sponsor is not the original sponsor of this swap")]
+    InvalidSponsor,
 
     #[msg("Attempt to perform a refund before expiry time")]
     RefundBeforeExpiry,
