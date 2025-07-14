@@ -31,13 +31,20 @@ describe("Testing one way swap between Alice and Bob", () => {
     pdaSeeds,
     program.programId
   );
+  const destinationData = crypto.randomBytes(256); // can be null
   let rentAmount: number;
 
   console.log({ alice: alice.publicKey, bob: bob.publicKey, swapAccount });
 
   const aliceInitiate = async () => {
     const initSignature = await program.methods
-      .initiate(swapAmount, expiresInSlots, bob.publicKey, [...secretHash])
+      .initiate(
+        swapAmount,
+        expiresInSlots,
+        bob.publicKey,
+        [...secretHash],
+        destinationData
+      )
       .accounts({
         initiator: alice.publicKey,
       })
