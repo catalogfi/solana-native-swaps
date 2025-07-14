@@ -22,6 +22,7 @@ pub mod solana_native_swaps {
         expires_in_slots: u64,
         redeemer: Pubkey,
         secret_hash: [u8; 32],
+        destination_data: Option<Vec<u8>>,
     ) -> Result<()> {
         let transfer_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -46,6 +47,7 @@ pub mod solana_native_swaps {
             initiator: ctx.accounts.initiator.key(),
             redeemer,
             secret_hash,
+            destination_data,
         });
 
         Ok(())
@@ -212,6 +214,8 @@ pub struct Initiated {
     pub initiator: Pubkey,
     pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    /// Information regarding the destination chain in the atomic swap.
+    pub destination_data: Option<Vec<u8>>,
 }
 /// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault
 #[event]
