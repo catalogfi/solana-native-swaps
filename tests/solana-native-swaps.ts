@@ -23,9 +23,11 @@ describe("Testing one way swap between Alice and Bob", () => {
 
   // SwapAccount PDA
   const pdaSeeds = [
-    Buffer.from("swap_account"),
+    expiresInSlots.toArrayLike(Buffer, "le", 8),
     alice.publicKey.toBuffer(),
-    Buffer.from(secretHash),
+    bob.publicKey.toBuffer(),
+    secretHash,
+    swapAmount.toArrayLike(Buffer, "le", 8),
   ];
   const [swapAccount] = web3.PublicKey.findProgramAddressSync(
     pdaSeeds,
@@ -39,10 +41,10 @@ describe("Testing one way swap between Alice and Bob", () => {
   const aliceInitiate = async () => {
     const initSignature = await program.methods
       .initiate(
-        swapAmount,
         expiresInSlots,
         bob.publicKey,
         [...secretHash],
+        swapAmount,
         destinationData
       )
       .accounts({

@@ -11,17 +11,17 @@ pub mod solana_native_swaps {
 
     /// Initiates the atomic swap. Funds are transferred from the initiator to the token vault.
     /// As such, the initiator's signature is required for this instruction.
-    /// `amount_lamports` represents the quantity of native SOL to be transferred
+    /// `swap_amount` represents the quantity of native SOL to be transferred
     /// through this atomic swap in base units (aka lamports).  
     /// E.g: A quantity of 1 SOL must be provided as 1,000,000,000.
     /// `expires_in_slots` represents the number of slots (1 slot = 400ms) after
     /// which (non-instant) refunds are allowed.
     pub fn initiate(
         ctx: Context<Initiate>,
-        amount_lamports: u64,
         expires_in_slots: u64,
         redeemer: Pubkey,
         secret_hash: [u8; 32],
+        swap_amount: u64,
         destination_data: Option<Vec<u8>>,
     ) -> Result<()> {
         let transfer_context = CpiContext::new(
@@ -31,22 +31,23 @@ pub mod solana_native_swaps {
                 to: ctx.accounts.swap_account.to_account_info(),
             },
         );
-        system_program::transfer(transfer_context, amount_lamports)?;
+        system_program::transfer(transfer_context, swap_amount)?;
 
         *ctx.accounts.swap_account = SwapAccount {
-            amount_lamports,
             expiry_slot: Clock::get()?.slot + expires_in_slots,
-            initiator: ctx.accounts.initiator.key(),
-            redeemer,
-            secret_hash,
-        };
-
-        emit!(Initiated {
-            swap_amount: amount_lamports,
             expires_in_slots,
             initiator: ctx.accounts.initiator.key(),
             redeemer,
             secret_hash,
+            swap_amount,
+        };
+
+        emit!(Initiated {
+            expires_in_slots,
+            initiator: ctx.accounts.initiator.key(),
+            redeemer,
+            secret_hash,
+            swap_amount,
             destination_data,
         });
 
@@ -55,18 +56,29 @@ pub mod solana_native_swaps {
 
     /// Funds are transferred to the redeemer. This instruction does not require any signatures.
     pub fn redeem(ctx: Context<Redeem>, secret: [u8; 32]) -> Result<()> {
+        let SwapAccount {
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
+            ..
+        } = *ctx.accounts.swap_account;
+
         require!(
-            hash::hash(&secret).to_bytes() == ctx.accounts.swap_account.secret_hash,
+            hash::hash(&secret).to_bytes() == secret_hash,
             SwapError::InvalidSecret
         );
 
-        let swap_amount = ctx.accounts.swap_account.amount_lamports;
         ctx.accounts.swap_account.sub_lamports(swap_amount)?;
         ctx.accounts.redeemer.add_lamports(swap_amount)?;
 
         emit!(Redeemed {
-            initiator: ctx.accounts.swap_account.initiator,
+            expires_in_slots,
+            initiator,
+            redeemer,
             secret,
+            swap_amount,
         });
 
         Ok(())
@@ -76,17 +88,28 @@ pub mod solana_native_swaps {
     /// and the expiry slot has been reached.
     /// This instruction does not require any signatures.
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
-        let expiry_slot = ctx.accounts.swap_account.expiry_slot;
+        let SwapAccount {
+            expiry_slot,
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
+            ..
+        } = *ctx.accounts.swap_account;
+
         let current_slot = Clock::get()?.slot;
         require!(current_slot > expiry_slot, SwapError::RefundBeforeExpiry);
 
-        let swap_amount = ctx.accounts.swap_account.amount_lamports;
         ctx.accounts.swap_account.sub_lamports(swap_amount)?;
         ctx.accounts.initiator.add_lamports(swap_amount)?;
 
         emit!(Refunded {
-            initiator: ctx.accounts.swap_account.initiator,
-            secret_hash: ctx.accounts.swap_account.secret_hash,
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
         });
 
         Ok(())
@@ -96,13 +119,24 @@ pub mod solana_native_swaps {
     /// As such, the redeemer's signature is required for this instruction.
     /// This allows for refunds before the expiry slot.
     pub fn instant_refund(ctx: Context<InstantRefund>) -> Result<()> {
-        let swap_amount = ctx.accounts.swap_account.amount_lamports;
+        let SwapAccount {
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
+            ..
+        } = *ctx.accounts.swap_account;
+
         ctx.accounts.swap_account.sub_lamports(swap_amount)?;
         ctx.accounts.initiator.add_lamports(swap_amount)?;
 
         emit!(InstantRefunded {
-            initiator: ctx.accounts.swap_account.initiator,
-            secret_hash: ctx.accounts.swap_account.secret_hash,
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
         });
 
         Ok(())
@@ -113,33 +147,42 @@ pub mod solana_native_swaps {
 #[account]
 #[derive(InitSpace)]
 pub struct SwapAccount {
-    /// The quantity of native SOL to be transferred through this atomic swap in base units (aka lamports)
-    amount_lamports: u64,
     /// The exact slot after which (non-instant) refunds are allowed
     expiry_slot: u64,
+
+    /// The number of slots after which (non-instant) refunds are allowed.
+    /// This is stored so that it can later be verified through events.
+    expires_in_slots: u64,
     /// The initiator of the atomic swap
     initiator: Pubkey,
     /// The redeemer of the atomic swap
     redeemer: Pubkey,
     /// The secret hash associated with the atomic swap
     secret_hash: [u8; 32],
+    /// The quantity of native SOL to be transferred through this atomic swap in base units (aka lamports)
+    swap_amount: u64,
 }
 
 #[derive(Accounts)]
 // The parameters must have the exact name and order as specified in the underlying function
 // to avoid "seed constraint violation" errors.
 // Refer: https://www.anchor-lang.com/docs/references/account-constraints#instruction-attribute
-#[instruction(amount_lamports: u64, expires_in_slots: u64, redeemer: Pubkey, secret_hash: [u8; 32])]
+#[instruction(expires_in_slots: u64, redeemer: Pubkey, secret_hash: [u8; 32], swap_amount: u64)]
 pub struct Initiate<'info> {
     /// A PDA that maintains the on-chain state of the atomic swap throughout its lifecycle.
     /// It also serves as the "vault" for this swap, by escrowing the SOL involved in this swap.
-    /// The choice of seeds ensures that any swap with equal `initiator` and
-    /// `secret_hash` cannot be created until an existing one completes.
+    /// The choice of seeds is to make the already expensive possibility of frontrunning, more expensive.
     /// This PDA will be deleted upon completion of the swap.
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_account", initiator.key().as_ref(), &secret_hash],
+        seeds = [
+            &expires_in_slots.to_le_bytes(),
+            initiator.key().as_ref(),
+            redeemer.as_ref(),
+            &secret_hash,
+            &swap_amount.to_le_bytes(),
+        ],
         bump,
         space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
     )]
@@ -205,36 +248,46 @@ pub struct InstantRefund<'info> {
 /// Represents the initiated state of the swap where the initiator has deposited funds into the vault
 #[event]
 pub struct Initiated {
-    /// The quantity of native SOL transferred through this atomic swap in base units (aka lamports).  
-    /// E.g: A quantity of 1 SOL will be represented as 1,000,000,000.
-    pub swap_amount: u64,
     /// `expires_in_slots` represents the number of slots (1 slot = 400ms) after which
     /// (non-instant) refunds are allowed
     pub expires_in_slots: u64,
     pub initiator: Pubkey,
     pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    /// The quantity of native SOL transferred through this atomic swap in base units (aka lamports).  
+    /// E.g: A quantity of 1 SOL will be represented as 1,000,000,000.
+    pub swap_amount: u64,
     /// Information regarding the destination chain in the atomic swap.
     pub destination_data: Option<Vec<u8>>,
 }
-/// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault
+/// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault.
+/// Note that the secret is emitted here, in place of the secret hash.
 #[event]
 pub struct Redeemed {
+    pub expires_in_slots: u64,
     pub initiator: Pubkey,
+    pub redeemer: Pubkey,
     pub secret: [u8; 32],
+    pub swap_amount: u64,
 }
 /// Represents the refund state of the swap, where the initiator has withdrawn funds from the vault past expiry
 #[event]
 pub struct Refunded {
+    pub expires_in_slots: u64,
     pub initiator: Pubkey,
+    pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    pub swap_amount: u64,
 }
 /// Represents the instant refund state of the swap, where the initiator has withdrawn funds the vault
 /// with the redeemer's consent
 #[event]
 pub struct InstantRefunded {
+    pub expires_in_slots: u64,
     pub initiator: Pubkey,
+    pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    pub swap_amount: u64,
 }
 
 #[error_code]
