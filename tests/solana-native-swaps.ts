@@ -21,7 +21,7 @@ describe("Testing one way swap between Alice and Bob", () => {
   // Bob is the redeemer here
   const bob = web3.Keypair.fromSeed(crypto.randomBytes(32));
 
-  const sponsor = new web3.Keypair();
+  const rentSponsor = new web3.Keypair();
   const funder = new web3.Keypair();
 
   // SwapAccount PDA
@@ -53,9 +53,9 @@ describe("Testing one way swap between Alice and Bob", () => {
       )
       .accounts({
         funder: alice.publicKey,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
       })
-      .signers([alice, sponsor])
+      .signers([alice, rentSponsor])
       .rpc({ commitment: "confirmed" });
     console.log("Alice initiated:", initSignature);
   };
@@ -75,8 +75,8 @@ describe("Testing one way swap between Alice and Bob", () => {
     };
     console.log("Fund alice with 1 SOL");
     await fund(alice.publicKey, 1);
-    console.log("Fund sponsor with 0.1 SOL");
-    await fund(sponsor.publicKey, 0.1);
+    console.log("Fund rent sponsor with 0.1 SOL");
+    await fund(rentSponsor.publicKey, 0.1);
     console.log("Fund funder with 1 SOL");
     await fund(funder.publicKey, 1);
   });
@@ -84,7 +84,9 @@ describe("Testing one way swap between Alice and Bob", () => {
   it("Test initiate on behalf", async () => {
     const alicePreBalance = await connection.getBalance(alice.publicKey);
     const funderPreBalance = await connection.getBalance(funder.publicKey);
-    const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPreBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
 
     const initiateOnBehalfSignature = await program.methods
       .initiate(
@@ -97,9 +99,9 @@ describe("Testing one way swap between Alice and Bob", () => {
       )
       .accounts({
         funder: funder.publicKey,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
       })
-      .signers([funder, sponsor])
+      .signers([funder, rentSponsor])
       .rpc();
     console.log(
       "Funder initiated on behalf of alice:",
@@ -117,20 +119,24 @@ describe("Testing one way swap between Alice and Bob", () => {
       funderPreBalance - swapAmount.toNumber()
     );
 
-    const sponsorPostBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPostBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
     expect(sponsorPostBalance).to.equal(sponsorPreBalance - rentAmount);
   });
 
   it("Test redeem", async () => {
     const bobPreBalance = await connection.getBalance(bob.publicKey);
-    const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPreBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
 
     // The previous test has already initiated the swap
     const redeemSignature = await program.methods
       .redeem([...secret])
       .accounts({
         swapAccount,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
         redeemer: bob.publicKey,
       })
       .rpc();
@@ -142,7 +148,9 @@ describe("Testing one way swap between Alice and Bob", () => {
     const pdaBalance = await connection.getBalance(swapAccount);
     expect(pdaBalance).to.equal(0);
 
-    const sponsorPostBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPostBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
     expect(sponsorPostBalance).to.equal(sponsorPreBalance + rentAmount);
   });
 
@@ -150,7 +158,9 @@ describe("Testing one way swap between Alice and Bob", () => {
     await aliceInitiate(); // Initiate again for the test
 
     const alicePreBalance = await connection.getBalance(alice.publicKey);
-    const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPreBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
 
     console.log("Awaiting timelock for refund");
     await setTimeout(timelock.toNumber() * 400 + 500);
@@ -160,7 +170,7 @@ describe("Testing one way swap between Alice and Bob", () => {
       .accounts({
         swapAccount,
         refundee: alice.publicKey,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
       })
       .rpc({ commitment: "confirmed" });
     console.log("Alice refunded:", refundSignature);
@@ -171,7 +181,9 @@ describe("Testing one way swap between Alice and Bob", () => {
     const pdaBalance = await connection.getBalance(swapAccount);
     expect(pdaBalance).to.equal(0);
 
-    const sponsorPostBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPostBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
     expect(sponsorPostBalance).to.equal(sponsorPreBalance + rentAmount);
   });
 
@@ -179,7 +191,9 @@ describe("Testing one way swap between Alice and Bob", () => {
     await aliceInitiate(); // Initiate again for the test
 
     const alicePreBalance = await connection.getBalance(alice.publicKey);
-    const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPreBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
 
     const instantRefundSignature = await program.methods
       .instantRefund()
@@ -187,7 +201,7 @@ describe("Testing one way swap between Alice and Bob", () => {
         swapAccount,
         refundee: alice.publicKey,
         redeemer: bob.publicKey,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
       })
       .signers([bob])
       .rpc();
@@ -199,7 +213,9 @@ describe("Testing one way swap between Alice and Bob", () => {
     const pdaBalance = await connection.getBalance(swapAccount);
     expect(pdaBalance).to.equal(0);
 
-    const sponsorPostBalance = await connection.getBalance(sponsor.publicKey);
+    const sponsorPostBalance = await connection.getBalance(
+      rentSponsor.publicKey
+    );
     expect(sponsorPostBalance).to.equal(sponsorPreBalance + rentAmount);
   });
 });
