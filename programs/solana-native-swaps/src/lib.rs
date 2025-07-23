@@ -35,6 +35,7 @@ pub mod solana_native_swaps {
 
         *ctx.accounts.swap_account = SwapAccount {
             expiry_slot: Clock::get()?.slot + expires_in_slots,
+            bump: ctx.bumps.swap_account,
             expires_in_slots,
             initiator: ctx.accounts.initiator.key(),
             redeemer,
@@ -149,6 +150,9 @@ pub mod solana_native_swaps {
 pub struct SwapAccount {
     /// The exact slot after which (non-instant) refunds are allowed
     expiry_slot: u64,
+    /// The bump that was used by the program to derive this PDA.
+    /// Storing this makes later verifications less expensive.
+    bump: u8,
 
     /// The number of slots after which (non-instant) refunds are allowed.
     /// This is stored so that it can later be verified through events.
@@ -200,7 +204,18 @@ pub struct Redeem<'info> {
     /// The PDA holding the state information of the atomic swap.
     /// Will be closed upon successful execution and the resulting rent
     /// will be transferred to the initiator.
-    #[account(mut, close = initiator)]
+    #[account(
+        mut,
+        seeds = [
+            &swap_account.expires_in_slots.to_le_bytes(),
+            swap_account.initiator.key().as_ref(),
+            swap_account.redeemer.as_ref(),
+            &swap_account.secret_hash,
+            &swap_account.swap_amount.to_le_bytes(),
+        ],
+        bump = swap_account.bump,
+        close = initiator
+    )]
     pub swap_account: Account<'info, SwapAccount>,
 
     /// CHECK: Verifying the initiator.  
@@ -218,7 +233,18 @@ pub struct Refund<'info> {
     /// The PDA holding the state information of the atomic swap.
     /// Will be closed upon successful execution and the resulting rent
     /// will be transferred to the initiator.
-    #[account(mut, close = initiator)]
+    #[account(
+        mut,
+        seeds = [
+            &swap_account.expires_in_slots.to_le_bytes(),
+            swap_account.initiator.key().as_ref(),
+            swap_account.redeemer.as_ref(),
+            &swap_account.secret_hash,
+            &swap_account.swap_amount.to_le_bytes(),
+        ],
+        bump = swap_account.bump,
+        close = initiator
+    )]
     pub swap_account: Account<'info, SwapAccount>,
 
     /// CHECK: Verifying the initiator.
@@ -232,7 +258,18 @@ pub struct InstantRefund<'info> {
     /// The PDA holding the state information of the atomic swap.
     /// Will be closed upon successful execution and the resulting rent
     /// will be transferred to the initiator.
-    #[account(mut, close = initiator)]
+    #[account(
+        mut,
+        seeds = [
+            &swap_account.expires_in_slots.to_le_bytes(),
+            swap_account.initiator.key().as_ref(),
+            swap_account.redeemer.as_ref(),
+            &swap_account.secret_hash,
+            &swap_account.swap_amount.to_le_bytes(),
+        ],
+        bump = swap_account.bump,
+        close = initiator
+    )]
     pub swap_account: Account<'info, SwapAccount>,
 
     /// CHECK: Verifying the initiator.
