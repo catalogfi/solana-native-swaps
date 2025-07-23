@@ -9,13 +9,15 @@ const ANCHOR_DISCRIMINATOR: usize = 8;
 pub mod solana_native_swaps {
     use super::*;
 
-    /// Initiates the atomic swap. Funds are transferred from the initiator to the token vault.
+    /// Initiates the atomic swap. Funds are transferred from the initiator to the swap account.
     /// As such, the initiator's signature is required for this instruction.
     /// `swap_amount` represents the quantity of native SOL to be transferred
     /// through this atomic swap in base units (aka lamports).  
     /// E.g: A quantity of 1 SOL must be provided as 1,000,000,000.
     /// `expires_in_slots` represents the number of slots (1 slot = 400ms) after
     /// which (non-instant) refunds are allowed.
+    /// `destination_data` is an optional field, intended to hold information regarding the
+    /// destination chain in the atomic swap.
     pub fn initiate(
         ctx: Context<Initiate>,
         expires_in_slots: u64,
