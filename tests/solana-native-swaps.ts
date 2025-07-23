@@ -12,7 +12,7 @@ const program = workspace.SolanaNativeSwaps as Program<SolanaNativeSwaps>;
 
 describe("Testing one way swap between Alice and Bob", () => {
   const swapAmount = new BN(0.1 * web3.LAMPORTS_PER_SOL);
-  const expiresInSlots = new BN(5); // 2 secs (1 slot = 0.4 secs)
+  const timelock = new BN(5); // 2 secs (1 slot = 0.4 secs)
   // Alice is the refundee here
   const alice = web3.Keypair.fromSeed(crypto.randomBytes(32));
   const secret = crypto.randomBytes(32);
@@ -26,11 +26,11 @@ describe("Testing one way swap between Alice and Bob", () => {
 
   // SwapAccount PDA
   const pdaSeeds = [
-    expiresInSlots.toArrayLike(Buffer, "le", 8),
     bob.publicKey.toBuffer(),
     alice.publicKey.toBuffer(),
     secretHash,
     swapAmount.toArrayLike(Buffer, "le", 8),
+    timelock.toArrayLike(Buffer, "le", 8),
   ];
   const [swapAccount] = web3.PublicKey.findProgramAddressSync(
     pdaSeeds,
@@ -44,11 +44,11 @@ describe("Testing one way swap between Alice and Bob", () => {
   const aliceInitiate = async () => {
     const initSignature = await program.methods
       .initiate(
-        expiresInSlots,
         bob.publicKey,
         alice.publicKey,
         [...secretHash],
         swapAmount,
+        timelock,
         destinationData
       )
       .accounts({
@@ -88,11 +88,11 @@ describe("Testing one way swap between Alice and Bob", () => {
 
     const initiateOnBehalfSignature = await program.methods
       .initiate(
-        expiresInSlots,
         bob.publicKey,
         alice.publicKey,
         secretHash,
         swapAmount,
+        timelock,
         null
       )
       .accounts({
@@ -153,7 +153,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
 
     console.log("Awaiting timelock for refund");
-    await setTimeout(expiresInSlots.toNumber() * 400 + 500);
+    await setTimeout(timelock.toNumber() * 400 + 500);
 
     const refundSignature = await program.methods
       .refund()
