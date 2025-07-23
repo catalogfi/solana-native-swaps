@@ -13,7 +13,7 @@ const program = workspace.SolanaNativeSwaps as Program<SolanaNativeSwaps>;
 describe("Testing one way swap between Alice and Bob", () => {
   const swapAmount = new BN(0.1 * web3.LAMPORTS_PER_SOL);
   const expiresInSlots = new BN(5); // 2 secs (1 slot = 0.4 secs)
-  // Alice is the initiator here
+  // Alice is the refundee here
   const alice = web3.Keypair.fromSeed(crypto.randomBytes(32));
   const secret = crypto.randomBytes(32);
   const secretHash = crypto.createHash("sha256").update(secret).digest();
@@ -27,8 +27,8 @@ describe("Testing one way swap between Alice and Bob", () => {
   // SwapAccount PDA
   const pdaSeeds = [
     expiresInSlots.toArrayLike(Buffer, "le", 8),
-    alice.publicKey.toBuffer(),
     bob.publicKey.toBuffer(),
+    alice.publicKey.toBuffer(),
     secretHash,
     swapAmount.toArrayLike(Buffer, "le", 8),
   ];
@@ -46,12 +46,13 @@ describe("Testing one way swap between Alice and Bob", () => {
       .initiate(
         expiresInSlots,
         bob.publicKey,
+        alice.publicKey,
         [...secretHash],
         swapAmount,
         destinationData
       )
       .accounts({
-        initiator: alice.publicKey,
+        funder: alice.publicKey,
         sponsor: sponsor.publicKey,
       })
       .signers([alice, sponsor])
@@ -86,10 +87,10 @@ describe("Testing one way swap between Alice and Bob", () => {
     const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
 
     const initiateOnBehalfSignature = await program.methods
-      .initiateOnBehalf(
+      .initiate(
         expiresInSlots,
-        alice.publicKey,
         bob.publicKey,
+        alice.publicKey,
         secretHash,
         swapAmount,
         null
@@ -98,7 +99,7 @@ describe("Testing one way swap between Alice and Bob", () => {
         funder: funder.publicKey,
         sponsor: sponsor.publicKey,
       })
-      .signers([sponsor, funder])
+      .signers([funder, sponsor])
       .rpc();
     console.log(
       "Funder initiated on behalf of alice:",
@@ -158,7 +159,7 @@ describe("Testing one way swap between Alice and Bob", () => {
       .refund()
       .accounts({
         swapAccount,
-        initiator: alice.publicKey,
+        refundee: alice.publicKey,
         sponsor: sponsor.publicKey,
       })
       .rpc({ commitment: "confirmed" });
@@ -184,7 +185,7 @@ describe("Testing one way swap between Alice and Bob", () => {
       .instantRefund()
       .accounts({
         swapAccount,
-        initiator: alice.publicKey,
+        refundee: alice.publicKey,
         redeemer: bob.publicKey,
         sponsor: sponsor.publicKey,
       })
