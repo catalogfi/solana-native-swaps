@@ -22,6 +22,7 @@ describe("Testing one way swap between Alice and Bob", () => {
   const bob = web3.Keypair.fromSeed(crypto.randomBytes(32));
 
   const sponsor = new web3.Keypair();
+  const funder = new web3.Keypair();
 
   // SwapAccount PDA
   const pdaSeeds = [
@@ -62,33 +63,58 @@ describe("Testing one way swap between Alice and Bob", () => {
     rentAmount = await connection.getMinimumBalanceForRentExemption(
       program.account.swapAccount.size
     );
-    let signature: string;
+
     const blockHash = await connection.getLatestBlockhash();
+    const fund = async (to: web3.PublicKey, qty: number) => {
+      const signature = await connection.requestAirdrop(
+        to,
+        qty * web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction({ signature, ...blockHash });
+    };
     console.log("Fund alice with 1 SOL");
-    signature = await connection.requestAirdrop(
-      alice.publicKey,
-      1 * web3.LAMPORTS_PER_SOL
-    );
-    await connection.confirmTransaction({ signature, ...blockHash });
+    await fund(alice.publicKey, 1);
     console.log("Fund sponsor with 0.1 SOL");
-    signature = await connection.requestAirdrop(
-      sponsor.publicKey,
-      0.1 * web3.LAMPORTS_PER_SOL
-    );
-    await connection.confirmTransaction({ signature, ...blockHash });
+    await fund(sponsor.publicKey, 0.1);
+    console.log("Fund funder with 1 SOL");
+    await fund(funder.publicKey, 1);
   });
 
-  it("Test initiation", async () => {
+  it("Test initiate on behalf", async () => {
     const alicePreBalance = await connection.getBalance(alice.publicKey);
+    const funderPreBalance = await connection.getBalance(funder.publicKey);
     const sponsorPreBalance = await connection.getBalance(sponsor.publicKey);
 
-    await aliceInitiate();
+    const initiateOnBehalfSignature = await program.methods
+      .initiateOnBehalf(
+        expiresInSlots,
+        alice.publicKey,
+        bob.publicKey,
+        secretHash,
+        swapAmount,
+        null
+      )
+      .accounts({
+        funder: funder.publicKey,
+        sponsor: sponsor.publicKey,
+      })
+      .signers([sponsor, funder])
+      .rpc();
+    console.log(
+      "Funder initiated on behalf of alice:",
+      initiateOnBehalfSignature
+    );
 
     const pdaBalance = await connection.getBalance(swapAccount);
     expect(pdaBalance).to.equal(rentAmount + swapAmount.toNumber());
 
     const alicePostBalance = await connection.getBalance(alice.publicKey);
-    expect(alicePostBalance).to.equal(alicePreBalance - swapAmount.toNumber());
+    expect(alicePostBalance).to.equal(alicePreBalance);
+
+    const funderPostBalance = await connection.getBalance(funder.publicKey);
+    expect(funderPostBalance).to.equal(
+      funderPreBalance - swapAmount.toNumber()
+    );
 
     const sponsorPostBalance = await connection.getBalance(sponsor.publicKey);
     expect(sponsorPostBalance).to.equal(sponsorPreBalance - rentAmount);
