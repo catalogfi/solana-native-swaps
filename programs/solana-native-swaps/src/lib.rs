@@ -56,6 +56,49 @@ pub mod solana_native_swaps {
         Ok(())
     }
 
+    /// Initiates the atomic swap. Funds are transferred from the funder to the swap account.
+    /// Refer [`InitiateOnBehalf`]
+    pub fn initiate_on_behalf(
+        ctx: Context<InitiateOnBehalf>,
+        expires_in_slots: u64,
+        initiator: Pubkey,
+        redeemer: Pubkey,
+        secret_hash: [u8; 32],
+        swap_amount: u64,
+        destination_data: Option<Vec<u8>>,
+    ) -> Result<()> {
+        let transfer_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.funder.to_account_info(),
+                to: ctx.accounts.swap_account.to_account_info(),
+            },
+        );
+        system_program::transfer(transfer_context, swap_amount)?;
+
+        *ctx.accounts.swap_account = SwapAccount {
+            expiry_slot: Clock::get()?.slot + expires_in_slots,
+            bump: ctx.bumps.swap_account,
+            sponsor: ctx.accounts.sponsor.key(),
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
+        };
+
+        emit!(Initiated {
+            expires_in_slots,
+            initiator,
+            redeemer,
+            secret_hash,
+            swap_amount,
+            destination_data,
+        });
+
+        Ok(())
+    }
+
     /// Funds are transferred to the redeemer. This instruction does not require any signatures.
     pub fn redeem(ctx: Context<Redeem>, secret: [u8; 32]) -> Result<()> {
         let SwapAccount {
@@ -201,6 +244,44 @@ pub struct Initiate<'info> {
     pub initiator: Signer<'info>,
 
     /// Any entity that pays the PDA rent.
+    /// Upon completion of the swap, the PDA rent refund resulting from the
+    /// deletion of `swap_account` will be refunded to this address.
+    #[account(mut)]
+    pub sponsor: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+/// Unlike regular initiates, the initiator neither deposits the funds, nor signs the instruction.
+/// This is done by an entity referred to as "funder".
+/// Apart from this one exception, the initiator's role remains the same.
+#[derive(Accounts)]
+#[instruction(expires_in_slots: u64, initiator: Pubkey, redeemer: Pubkey, secret_hash: [u8; 32], swap_amount: u64)]
+pub struct InitiateOnBehalf<'info> {
+    /// A PDA that maintains the on-chain state of the atomic swap throughout its lifecycle.
+    /// It also serves as the "vault" for this swap, by escrowing the SOL involved in this swap.
+    /// The choice of seeds is to make the already expensive possibility of frontrunning, more expensive.
+    /// This PDA will be deleted upon completion of the swap.
+    #[account(
+        init,
+        payer = sponsor,
+        seeds = [
+            &expires_in_slots.to_le_bytes(),
+            initiator.as_ref(),
+            redeemer.as_ref(),
+            &secret_hash,
+            &swap_amount.to_le_bytes(),
+        ],
+        bump,
+        space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
+    )]
+    pub swap_account: Account<'info, SwapAccount>,
+
+    /// The entity that deposits funds on behalf of the initiator. They must sign this instruction.
+    #[account(mut)]
+    pub funder: Signer<'info>,
+
+    /// Any entity that pays the PDA rent
     /// Upon completion of the swap, the PDA rent refund resulting from the
     /// deletion of `swap_account` will be refunded to this address.
     #[account(mut)]
