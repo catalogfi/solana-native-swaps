@@ -35,8 +35,12 @@ pub mod solana_native_swaps {
         );
         system_program::transfer(transfer_context, swap_amount)?;
 
+        let expiry_slot = Clock::get()?
+            .slot
+            .checked_add(timelock)
+            .expect("timelock should not cause an overflow");
         *ctx.accounts.swap_account = SwapAccount {
-            expiry_slot: Clock::get()?.slot + timelock,
+            expiry_slot,
             bump: ctx.bumps.swap_account,
             rent_sponsor: ctx.accounts.rent_sponsor.key(),
             refundee,
