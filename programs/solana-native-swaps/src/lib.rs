@@ -186,14 +186,12 @@ pub mod solana_native_swaps {
         destination_data: Vec<u8>,
         destination_hash: [u8; 32],
     ) -> Result<()> {
-        require!(amount > 0, UDAError::ZeroAmount);
         require!(refund_address != redeemer, UDAError::SameAddress);
         require!(refund_address != Pubkey::default(), UDAError::InvalidAddress);
         require!(redeemer != Pubkey::default(), UDAError::InvalidAddress);
-        require!(timelock > 0, UDAError::InvalidTimelock);
         require!(secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
 
-        let computed_hash = hash(&destination_data).to_bytes();
+        let computed_hash = hash::hash(&destination_data).to_bytes();
         require!(destination_hash == computed_hash, UDAError::InvalidSecretHash);
 
         let clock = Clock::get()?;
@@ -212,18 +210,6 @@ pub mod solana_native_swaps {
         uda.destination_data = destination_data.clone();
         uda.destination_hash = destination_hash;
 
-        transfer(
-            CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
-                SystemTransfer {
-                    from: ctx.accounts.payer.to_account_info(),
-                    to: ctx.accounts.uda.to_account_info(),
-                },
-            ),
-            amount,
-        )?;
-
-        // Emit event
         emit!(UDACreated {
             uda_address: ctx.accounts.uda.key(),
             refund_address,
@@ -236,12 +222,13 @@ pub mod solana_native_swaps {
 
     /// Initiate Hash Time Lock Contract for a native SOL UDA
     /// 
-    /// Creates and executes an HTLC instruction on the registered HTLC program
-    /// for native SOL transfers. After initiation, transfers any excess SOL to 
-    /// the refund address and closes the UDA account, returning rent to the sponsor.
+    /// Creates an HTLC swap account directly for native SOL transfers.
+    /// Transfers the exact swap amount from the UDA to the swap account.
+    /// After initiation, transfers any excess SOL to the refund address 
+    /// and closes the UDA account, returning rent to the sponsor.
     /// 
     /// # Arguments
-    /// * `ctx` - Context containing UDA, HTLC program, and cleanup accounts
+    /// * `ctx` - Context containing UDA, swap account, and cleanup accounts
     /// 
     /// # Returns
     /// * `Result<()>` - Success or error
@@ -249,88 +236,54 @@ pub mod solana_native_swaps {
     /// # Errors
     /// * `InvalidState` - If UDA is not in Created state
     /// * `InvalidTimelock` - If timelock is zero
-    /// * `InvalidHTLCProgram` - If HTLC program doesn't match UDA registration
     /// * `InsufficientFunds` - If UDA doesn't have enough SOL for the operation
-    pub fn initiate_htlc_native(ctx: Context<InitiateNativeHTLC>) -> Result<()> {
+    pub fn initiate_uda(ctx: Context<InitiateNativeHTLC>) -> Result<()> {
         let uda = &mut ctx.accounts.uda;
 
-        let rent_exempt = Rent::get()?.minimum_balance(uda.to_account_info().data_len());
+        let uda_rent_exempt = Rent::get()?.minimum_balance(uda.to_account_info().data_len());
         require!(
-            uda.to_account_info().lamports() >= uda.amount.checked_add(rent_exempt).ok_or(UDAError::InsufficientFunds)?,
+            uda.to_account_info().lamports() >= uda.amount.checked_add(uda_rent_exempt).ok_or(UDAError::InsufficientFunds)?,
             UDAError::InsufficientFunds
         );
 
-        let current_slot = Clock::get()?.slot;
-        let timelock_slots = uda.timelock.checked_sub(current_slot).ok_or(UDAError::Expired)?; // @audit if you revert here, user cannot recover funds
+        // Store values we need before transferring
+        let refund_address = uda.refund_address;
+        let redeemer = uda.redeemer;
+        let secret_hash = uda.secret_hash;
+        let amount = uda.amount;
+        let timelock = uda.timelock;
 
-        let refund_seed = uda.refund_address.key();
-        let redeemer_seed = uda.redeemer.key();
-
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"native_uda",
-            refund_seed.as_ref(),
-            redeemer_seed.as_ref(),
-            &uda.secret_hash,
-            &uda.amount.to_le_bytes(),
-            &uda.timelock.to_le_bytes(),
-            &uda.destination_hash,
-        ]];
-
-        let instruction = anchor_lang::solana_program::instruction::Instruction {
-            program_id: uda.htlc_program,
-            accounts: vec![
-                anchor_lang::solana_program::instruction::AccountMeta::new(
-                    ctx.accounts.swap_account.key(),
-                    false,
-                ),
-                anchor_lang::solana_program::instruction::AccountMeta::new(
-                    uda.to_account_info().key(),
-                    true,
-                ),
-                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
-                    ctx.accounts.system_program.key(),
-                    false,
-                ),
-            ],
-            data: {
-                let destination_data = &uda.destination_data;
-                let mut data = Vec::with_capacity(8 + 32 + 32 + 32 + 8 + 8 + 1 + 4 + destination_data.len());
-                
-                let discriminator = anchor_lang::solana_program::hash::hash(b"global:initiate")
-                    .to_bytes()[..8].to_vec();
-                data.extend_from_slice(&discriminator);
-                
-                data.extend_from_slice(&uda.redeemer.to_bytes());
-                data.extend_from_slice(&uda.refund_address.to_bytes());
-                data.extend_from_slice(&uda.secret_hash);
-                data.extend_from_slice(&uda.amount.to_le_bytes());
-                data.extend_from_slice(&timelock_slots.to_le_bytes());
-                
-                // Add destination_data length and content
-                data.extend_from_slice(&(destination_data.len() as u32).to_le_bytes());
-                data.extend_from_slice(destination_data);
-                
-                data
+        // Transfer the exact swap amount from the UDA to the swap account
+        let transfer_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: uda.to_account_info(),
+                to: ctx.accounts.swap_account.to_account_info(),
             },
+        );
+        system_program::transfer(transfer_context, amount)?;
+
+        let expiry_slot = Clock::get()?
+            .slot
+            .checked_add(timelock)
+            .expect("timelock should not cause an overflow");
+
+        // Initialize the swap account (created in this instruction via Init constraint)
+        *ctx.accounts.swap_account = SwapAccount {
+            expiry_slot,
+            bump: ctx.bumps.swap_account,
+            rent_sponsor: ctx.accounts.rent_sponsor.key(),
+            refundee: refund_address,
+            redeemer,
+            secret_hash,
+            swap_amount: amount,
+            timelock,
         };
 
-        anchor_lang::solana_program::program::invoke_signed(
-            &instruction,
-            &[
-                ctx.accounts.swap_account.to_account_info(),
-                uda.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            signer_seeds,
-        )?;
-
-        // Calculate excess SOL after HTLC initiation and rent exemption
+        // After moving the required amount, send any residual balance in the UDA back to the refund address
         let current_balance = uda.to_account_info().lamports();
-        let rent_exempt = Rent::get()?.minimum_balance(uda.to_account_info().data_len());
-        
-        // Transfer any excess SOL to refund address before closing
-        if current_balance > rent_exempt {
-            let excess_amount = current_balance.checked_sub(rent_exempt).ok_or(UDAError::InsufficientFunds)?;
+        if current_balance > uda_rent_exempt {
+            let excess_amount = current_balance.checked_sub(uda_rent_exempt).ok_or(UDAError::InsufficientFunds)?;
             
             if excess_amount > 0 {
                 **uda.to_account_info().try_borrow_mut_lamports()? = 
@@ -342,8 +295,17 @@ pub mod solana_native_swaps {
 
         emit!(HTLCInitiated {
             uda_address: uda.key(),
-            swap_amount: uda.amount,
-            timelock: uda.timelock,
+            swap_amount: amount,
+            timelock,
+        });
+
+        emit!(Initiated {
+            redeemer,
+            refundee: refund_address,
+            secret_hash,
+            swap_amount: amount,
+            timelock,
+            destination_data: Some(uda.destination_data.clone()),
         });
 
         Ok(())
@@ -398,17 +360,9 @@ pub struct SwapAccount {
     timelock: u64,
     secret_hash: [u8; 32],
     amount: u64,
-    htlc_program: Pubkey,
-    destination_data: Vec<u8>,
+    destination_hash: [u8; 32],
 )]
 pub struct CreateNativeUDA<'info> {
-    // Mandatory registry account for validation - ensures only authorized HTLC programs can be used
-    #[account(
-        seeds = [b"htlc_registry"],
-        bump,
-    )]
-    pub registry: Account<'info, HTLCRegistry>,
-    
     #[account(
         init,
         payer = payer,
@@ -419,14 +373,63 @@ pub struct CreateNativeUDA<'info> {
             &secret_hash,
             &amount.to_le_bytes(),
             &timelock.to_le_bytes(),
+            &destination_hash,
         ],
         bump,
-        space = NativeUDA::INIT_SPACE,
+        space = ANCHOR_DISCRIMINATOR + NativeUDA::INIT_SPACE,
     )]
     pub uda: Account<'info, NativeUDA>,
 
     #[account(mut)]
     pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct InitiateNativeHTLC<'info> {
+    #[account(
+        mut,
+        close = rent_sponsor,
+        seeds = [
+            b"native_uda",
+            uda.refund_address.as_ref(),
+            uda.redeemer.as_ref(),
+            &uda.secret_hash,
+            &uda.amount.to_le_bytes(),
+            &uda.timelock.to_le_bytes(),
+            &uda.destination_hash,
+        ],
+        bump,
+    )]
+    pub uda: Account<'info, NativeUDA>,
+
+    /// Swap account (created here to mirror standard initiate flow) storing absolute timelock
+    #[account(
+        init,
+        payer = rent_sponsor,
+        seeds = [
+            uda.redeemer.as_ref(),
+            uda.refund_address.as_ref(),
+            &uda.secret_hash,
+            &uda.amount.to_le_bytes(),
+            &uda.timelock.to_le_bytes(),
+        ],
+        bump,
+        space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
+    )]
+    pub swap_account: Account<'info, SwapAccount>,
+
+    /// CHECK: Validated against stored refund_address - receives excess SOL
+    #[account(
+        mut,
+        address = uda.refund_address
+    )]
+    pub refund_address: AccountInfo<'info>,
+
+    /// CHECK: Validated against stored rent_sponsor - receives rent back (and pays for new accounts)
+    #[account(mut, address = uda.rent_sponsor)]
+    pub rent_sponsor: Signer<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -609,7 +612,6 @@ pub struct UDACreated {
 #[event]
 pub struct HTLCInitiated {
     pub uda_address: Pubkey,
-    pub htlc_program: Pubkey,
     pub swap_amount: u64,
     pub timelock: u64,
 }
@@ -630,4 +632,53 @@ pub enum SwapError {
 
     #[msg("Attempt to refund before timelock expiry")]
     RefundBeforeExpiry,
+}
+
+
+#[error_code]
+pub enum UDAError {
+    #[msg("Invalid timelock - must be greater than zero")]
+    InvalidTimelock,
+
+    #[msg("Amount cannot be zero")]
+    ZeroAmount,
+
+    #[msg("Invalid address - cannot be zero address")]
+    InvalidAddress,
+
+    #[msg("Refund address and redeemer cannot be the same")]
+    SameAddress,
+
+    #[msg("Invalid UDA state for this operation")]
+    InvalidState,
+
+    #[msg("UDA has expired")]
+    Expired,
+
+    #[msg("Insufficient funds in UDA")]
+    InsufficientFunds,
+
+    #[msg("Invalid refund address")]
+    InvalidRefundAddress,
+
+    #[msg("Invalid HTLC program address")]
+    InvalidHTLCProgram,
+
+    #[msg("Invalid secret hash - cannot be zero")]
+    InvalidSecretHash,
+
+    #[msg("Invalid mint address")]
+    InvalidMint,
+
+    #[msg("Unauthorized operation")]
+    Unauthorized,
+    
+    #[msg("Token already registered")]
+    TokenAlreadyRegistered,
+
+    #[msg("Invalid destination data provided")]
+    InvalidDestinationData,
+
+    #[msg("Destination hash does not match destination data")]
+    DestinationHashMismatchComputedHash,
 }
