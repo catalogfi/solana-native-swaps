@@ -192,7 +192,7 @@ pub mod solana_native_swaps {
         require!(secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
 
         let computed_hash = hash::hash(&destination_data).to_bytes();
-        require!(destination_hash == computed_hash, UDAError::InvalidSecretHash);
+        require!(destination_hash == computed_hash, UDAError::DestinationHashMismatchComputedHash);
 
         let clock = Clock::get()?;
         let current_slot = clock.slot;
@@ -237,7 +237,7 @@ pub mod solana_native_swaps {
     /// * `InvalidState` - If UDA is not in Created state
     /// * `InvalidTimelock` - If timelock is zero
     /// * `InsufficientFunds` - If UDA doesn't have enough SOL for the operation
-    pub fn initiate_uda(ctx: Context<InitiateNativeHTLC>) -> Result<()> {
+    pub fn initiate_uda(ctx: Context<InitiateUDA>) -> Result<()> {
         let uda = &mut ctx.accounts.uda;
 
         let uda_rent_exempt = Rent::get()?.minimum_balance(uda.to_account_info().data_len());
@@ -387,7 +387,7 @@ pub struct CreateNativeUDA<'info> {
 }
 
 #[derive(Accounts)]
-pub struct InitiateNativeHTLC<'info> {
+pub struct InitiateUDA<'info> {
     #[account(
         mut,
         close = rent_sponsor,
@@ -634,50 +634,22 @@ pub enum SwapError {
     RefundBeforeExpiry,
 }
 
-
 #[error_code]
 pub enum UDAError {
-    #[msg("Invalid timelock - must be greater than zero")]
-    InvalidTimelock,
-
-    #[msg("Amount cannot be zero")]
-    ZeroAmount,
-
     #[msg("Invalid address - cannot be zero address")]
     InvalidAddress,
 
     #[msg("Refund address and redeemer cannot be the same")]
     SameAddress,
 
-    #[msg("Invalid UDA state for this operation")]
-    InvalidState,
-
-    #[msg("UDA has expired")]
-    Expired,
-
     #[msg("Insufficient funds in UDA")]
     InsufficientFunds,
-
-    #[msg("Invalid refund address")]
-    InvalidRefundAddress,
-
-    #[msg("Invalid HTLC program address")]
-    InvalidHTLCProgram,
 
     #[msg("Invalid secret hash - cannot be zero")]
     InvalidSecretHash,
 
     #[msg("Invalid mint address")]
     InvalidMint,
-
-    #[msg("Unauthorized operation")]
-    Unauthorized,
-    
-    #[msg("Token already registered")]
-    TokenAlreadyRegistered,
-
-    #[msg("Invalid destination data provided")]
-    InvalidDestinationData,
 
     #[msg("Destination hash does not match destination data")]
     DestinationHashMismatchComputedHash,
