@@ -57,6 +57,7 @@ pub mod solana_native_swaps {
             swap_amount,
             timelock,
             destination_data,
+            funder: ctx.accounts.funder.key(),
         });
 
         Ok(())
@@ -313,6 +314,8 @@ pub struct Initiated {
     pub timelock: u64,
     /// Information regarding the destination chain in the atomic swap.
     pub destination_data: Option<Vec<u8>>,
+    /// The party that deposited the funds for the atomic swap.
+    pub funder: Pubkey,
 }
 /// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault.
 /// Note that the secret is emitted here, in place of the secret hash.
