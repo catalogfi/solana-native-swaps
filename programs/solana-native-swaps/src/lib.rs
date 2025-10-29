@@ -176,45 +176,38 @@ pub mod solana_native_swaps {
     /// * `InvalidHTLCProgram` - If HTLC program is not registered
     /// * `InvalidTimelock` - If timelock is zero
     /// * `InvalidSecretHash` - If secret hash is all zeros or destination hash mismatch
-    pub fn create_uda_native(
+    pub fn create_native_uda(
         ctx: Context<CreateNativeUDA>,
-        amount: u64,
-        refund_address: Pubkey,
-        redeemer: Pubkey,
-        timelock: u64,
-        secret_hash: [u8; 32],
-        destination_data: Vec<u8>,
-        destination_hash: [u8; 32],
+        params: CreateNativeUDAParams,
     ) -> Result<()> {
-        require!(refund_address != redeemer, UDAError::SameAddress);
-        require!(refund_address != Pubkey::default(), UDAError::InvalidAddress);
-        require!(redeemer != Pubkey::default(), UDAError::InvalidAddress);
-        require!(secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
+        require!(params.refund_address != params.redeemer, UDAError::SameAddress);
+        require!(params.refund_address != Pubkey::default(), UDAError::InvalidAddress);
+        require!(params.redeemer != Pubkey::default(), UDAError::InvalidAddress);
+        require!(params.secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
 
-        let computed_hash = hash::hash(&destination_data).to_bytes();
-        require!(destination_hash == computed_hash, UDAError::DestinationHashMismatchComputedHash);
+        let computed_hash = hash::hash(&params.destination_data).to_bytes();
+        require!(params.destination_hash == computed_hash, UDAError::DestinationHashMismatchComputedHash);
 
-        let clock = Clock::get()?;
-        let current_slot = clock.slot;
+        Clock::get()?
+            .slot
+            .checked_add(params.timelock)
+            .expect("timelock should not cause an overflow");
 
         let uda = &mut ctx.accounts.uda;
-        require!(uda.key() != redeemer, UDAError::SameAddress);
+        require!(uda.key() != params.redeemer, UDAError::SameAddress);
 
-        uda.refund_address = refund_address;
-        uda.redeemer = redeemer;
-        uda.timelock = timelock;
-        uda.secret_hash = secret_hash;
-        uda.amount = amount;
-        uda.created_at = current_slot;
+        uda.refund_address = params.refund_address;
+        uda.redeemer = params.redeemer;
+        uda.timelock = params.timelock;
+        uda.secret_hash = params.secret_hash;
+        uda.amount = params.amount;
         uda.rent_sponsor = ctx.accounts.payer.key();
-        uda.destination_data = destination_data.clone();
-        uda.destination_hash = destination_hash;
+        uda.destination_data = params.destination_data.clone();
+        uda.destination_hash = params.destination_hash;
 
         emit!(UDACreated {
-            uda_address: ctx.accounts.uda.key(),
-            refund_address,
-            amount,
-            timelock,
+            uda_address: uda.key(),
+            uda: uda.clone().into_inner()
         });
 
         Ok(())
@@ -312,6 +305,17 @@ pub mod solana_native_swaps {
     }
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct CreateNativeUDAParams {
+    pub amount: u64,
+    pub refund_address: Pubkey,
+    pub redeemer: Pubkey,
+    pub timelock: u64,
+    pub secret_hash: [u8; 32],
+    pub destination_data: Vec<u8>,
+    pub destination_hash: [u8; 32],
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct NativeUDA {
@@ -320,7 +324,6 @@ pub struct NativeUDA {
     pub timelock: u64,
     pub secret_hash: [u8; 32],
     pub amount: u64,
-    pub created_at: u64,        // Slot when UDA was created (0 = not created, >0 = created)
     pub rent_sponsor: Pubkey, // Who paid for UDA creation (gets rent back)
     #[max_len(10240)]  // Large limit - user pays for storage
     pub destination_data: Vec<u8>, // Destination data for cross-chain/routing purposes
@@ -481,7 +484,7 @@ pub struct Redeem<'info> {
         mut,
         seeds = [
             swap_account.redeemer.as_ref(),
-            swap_account.refundee.key().as_ref(),
+            swap_account.refundee.as_ref(),
             &swap_account.secret_hash,
             &swap_account.swap_amount.to_le_bytes(),
             &swap_account.timelock.to_le_bytes(),
@@ -507,7 +510,7 @@ pub struct Refund<'info> {
         mut,
         seeds = [
             swap_account.redeemer.as_ref(),
-            swap_account.refundee.key().as_ref(),
+            swap_account.refundee.as_ref(),
             &swap_account.secret_hash,
             &swap_account.swap_amount.to_le_bytes(),
             &swap_account.timelock.to_le_bytes(),
@@ -533,7 +536,7 @@ pub struct InstantRefund<'info> {
         mut,
         seeds = [
             swap_account.redeemer.as_ref(),
-            swap_account.refundee.key().as_ref(),
+            swap_account.refundee.as_ref(),
             &swap_account.secret_hash,
             &swap_account.swap_amount.to_le_bytes(),
             &swap_account.timelock.to_le_bytes(),
@@ -604,9 +607,7 @@ pub struct InstantRefunded {
 #[event]
 pub struct UDACreated {
     pub uda_address: Pubkey,
-    pub refund_address: Pubkey,
-    pub amount: u64,
-    pub timelock: u64,
+    pub uda: NativeUDA
 }
 
 #[event]
